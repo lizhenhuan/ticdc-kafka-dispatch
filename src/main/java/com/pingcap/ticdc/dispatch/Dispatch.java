@@ -11,6 +11,9 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class Dispatch {
 
@@ -22,17 +25,33 @@ public class Dispatch {
 
     private static final Map<String, List> DATA_MAP = new HashMap<>();
 
-    private static String SERVER = "";
+    private static String SERVER = "", TOPIC = "", GROUPID = "";
 
     /**
      *
      * @param args bootstrap.servers topic groupId
      */
     public static void main(String[] args) {
+        parseArgs(args);
         KafkaConsumer<String, String> kafkaConsumer = createConsumer(args);
         readMessage(kafkaConsumer);
     }
+
+    private static void parseArgs(String [] args) {
+        if (args.length == 3) {
+            SERVER = args[0];
+            TOPIC = args[1];
+            GROUPID = args[2];
+        } else {
+            LOGGER.error("please input 3 args: bootstrap.servers topic groupId");
+            System.exit(1);
+        }
+    }
+
     private static void readMessage(KafkaConsumer<String, String> kafkaConsumer) {
+        int cores = Runtime.getRuntime().availableProcessors();
+        cores = cores / 5 < 1 ? 1 : cores / 5 % 15;
+        ExecutorService executorService = Executors.newFixedThreadPool(cores);
         while (true) {
             Duration duration = Duration.ofMillis(1000);
             ConsumerRecords<String, String> records = kafkaConsumer.poll(duration);
@@ -50,37 +69,37 @@ public class Dispatch {
                 }
                 list.add(value);
             }
+            final CountDownLatch countDownLatch = new CountDownLatch(DATA_MAP.size());
             DATA_MAP.forEach((topic,dataList) -> {
-                sendMessage(topic, dataList);
+                if (dataList.size() > 0) {
+                    executorService.execute(
+                            () -> {
+                                try {
+                                    sendMessage(topic, dataList);
+                                } catch (Exception e) {
+                                    LOGGER.error("send message error", e);
+                                } finally {
+                                    countDownLatch.countDown();
+                                }
+                            }
+                    );
+                } else {
+                    countDownLatch.countDown();
+                }
             });
-            kafkaConsumer.commitAsync();
+            try {
+                countDownLatch.await();
+                kafkaConsumer.commitAsync();
+            } catch (InterruptedException e) {
+                LOGGER.error("wait count down latch error", e);
+            }
         }
     }
 
-//    private static void printOffsets(KafkaConsumer<String, String> consumer, TopicPartition topicPartition) {
-//
-//        OffsetAndMetadata committed = consumer
-//                .committed(topicPartition);
-//        consumer.position(topicPartition);
-//        Long offset = committed.offset();
-//        long position = consumer.position(topicPartition);
-//        LOGGER.info("Committed: %s, current position %s%n", offset, position);
-//    }
     private static KafkaConsumer<String, String> createConsumer(String[] args) {
-        String servers = "", topic = "", groupId = "";
-        if (args.length == 3) {
-            servers = args[0];
-            topic = args[1];
-            groupId = args[2];
-        } else {
-            System.out.println("please input 3 args: bootstrap.servers topic groupId");
-            System.exit(1);
-        }
-        SERVER = servers;
-
         Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, servers);
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, SERVER);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, GROUPID);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringDeserializer");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringDeserializer");
@@ -88,7 +107,7 @@ public class Dispatch {
         props.put("auto.commit.interval.ms", "1000");
         props.put("session.timeout.ms", "30000");
         KafkaConsumer<String, String> consumer = new KafkaConsumer< >(props);
-        consumer.subscribe(Arrays.asList(topic));
+        consumer.subscribe(Arrays.asList(TOPIC));
         return consumer;
     }
     private static KafkaProducer<String, String> initProducer(String topic) {
