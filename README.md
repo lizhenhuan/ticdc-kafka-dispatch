@@ -15,5 +15,6 @@ bdp_admin.t1 topic数据如下：
 
 
 项目使用介绍：
+
 mvn clean package 
 java -cp target/ticdc-kafka-dispatch-1.0-SNAPSHOT.jar com.pingcap.ticdc.dispatch.Dispatch bootstrap.servers topic groupId
