@@ -1,3 +1,4 @@
+ticdc-kafka-dispatch介绍：
 在 TiDB 6.1 之前 TiCDC 会将多个表数据发送到一个 Kafka Topic
 此项目将 TiCDC 单个 Topic 的数据按照 db 和 table 做 topic 拆分。
 例如 TiCDC 将数据发送到在 test_cdc topic 中原始数据如下：
